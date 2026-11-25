@@ -1,4 +1,4 @@
-# GrainScan frontend deployment (Vercel + Hugging Face)
+# GrainScan frontend deployment (Vercel + Hugging Face Gradio)
 
 ## Vercel project settings
 
@@ -6,48 +6,28 @@
 - Root directory: `frontend`
 - Build command: `npm run build`
 - Install command: `npm install`
-- Output directory: leave default
-- Node.js: `20.x`
+- Node.js: `20.x` (or any >= 18)
 
 ## Environment variables
-
-Set these in Vercel → Project → Settings → Environment Variables:
 
 ```env
 NEXT_PUBLIC_HF_SPACE_ID=prome21/grainscan-api
 NEXT_PUBLIC_MAX_MB=15
 ```
 
-Optional override (server-side only; not required if HF_SPACE_ID is set):
+## Architecture
 
-```env
-NEXT_PUBLIC_API_URL=https://prome21-grainscan-api.hf.space
-```
+Browser → Vercel same-origin routes only:
 
-Do **not** put `HF_TOKEN` in any `NEXT_PUBLIC_` variable.
+| Client request | Server proxy does |
+|----------------|-------------------|
+| `GET  /api/info` | Probe `GET {HF}/gradio_api/info` → `ServerInfo` |
+| `POST /api/analyze` (FormData) | 1. Upload to `{HF}/gradio_api/upload`<br>2. Call `{HF}/gradio_api/call/analyze`<br>3. Poll SSE for result |
 
-After changing variables, redeploy.
-
-## Architecture (important)
-
-The browser talks **only** to your Vercel domain:
-
-- `GET  /api/info`     → Next.js route → proxies to HF Space `/api/info`
-- `POST /api/analyze`  → Next.js route → proxies FormData to HF Space `/api/analyze`
-
-This avoids Hugging Face’s “Cross-site POST form submissions are forbidden” (403) block that applies to direct browser POSTs to `*.hf.space`.
-
-## Hugging Face API contract
-
-The Space must expose:
-
-- `GET  /api/info`  → `ServerInfo` JSON
-- `POST /api/analyze` (multipart `file`) → `AnalyzeResponse` JSON
+HF Spaces block browser (and some form) POSTs to non-Gradio paths. Gradio API endpoints work from the server.
 
 ## Troubleshooting
 
-1. Confirm Root Directory is `frontend`.
-2. Confirm build reaches `Running \`npm run build\``.
-3. Confirm `NEXT_PUBLIC_HF_SPACE_ID` is `owner/space-name`.
-4. Confirm the Space is public and the FastAPI routes are live.
-5. In browser Network tab, the analyze request must go to **your** domain `/api/analyze`, not to `*.hf.space`.
+1. Network tab: analyze request must hit **your** domain `/api/analyze` (200).
+2. If 502/503: Space may be cold-starting (ZeroGPU) — wait and retry.
+3. Confirm Space shows Gradio UI and named endpoint `/analyze` under Use via API.

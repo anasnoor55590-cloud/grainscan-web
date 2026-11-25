@@ -18,6 +18,9 @@ function resolveBackendUrl(): string {
 
 const BACKEND = resolveBackendUrl();
 
+/**
+ * Gradio Space has no /api/info. We probe /gradio_api/info and synthesize ServerInfo.
+ */
 export async function GET(_req: NextRequest) {
   try {
     const controller = new AbortController();
@@ -25,7 +28,7 @@ export async function GET(_req: NextRequest) {
 
     let res: Response;
     try {
-      res = await fetch(`${BACKEND}/api/info`, {
+      res = await fetch(`${BACKEND}/gradio_api/info`, {
         method: "GET",
         signal: controller.signal,
         cache: "no-store",
@@ -34,16 +37,36 @@ export async function GET(_req: NextRequest) {
       clearTimeout(timeout);
     }
 
-    const contentType = res.headers.get("content-type") || "application/json";
-    const body = await res.arrayBuffer();
+    if (!res.ok) {
+      return NextResponse.json(
+        {
+          ready: false,
+          error: `Backend responded ${res.status}`,
+          model_version: null,
+          device: null,
+          max_upload_mb: 15,
+        },
+        { status: 200, headers: { "Cache-Control": "no-store" } }
+      );
+    }
 
-    return new NextResponse(body, {
-      status: res.status,
-      headers: {
-        "Content-Type": contentType,
-        "Cache-Control": "no-store",
+    const info = await res.json();
+    const hasAnalyze =
+      info &&
+      typeof info === "object" &&
+      info.named_endpoints &&
+      "/analyze" in info.named_endpoints;
+
+    return NextResponse.json(
+      {
+        ready: Boolean(hasAnalyze),
+        error: hasAnalyze ? null : "Analyze endpoint not found on Gradio Space",
+        model_version: hasAnalyze ? "zerogpu-models" : null,
+        device: "zerogpu",
+        max_upload_mb: 15,
       },
-    });
+      { status: 200, headers: { "Cache-Control": "no-store" } }
+    );
   } catch (err) {
     const message =
       err instanceof Error && err.name === "AbortError"
@@ -57,7 +80,7 @@ export async function GET(_req: NextRequest) {
         device: null,
         max_upload_mb: 15,
       },
-      { status: 503 }
+      { status: 200, headers: { "Cache-Control": "no-store" } }
     );
   }
 }
