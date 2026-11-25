@@ -1,19 +1,15 @@
 "use client";
 import { useEffect, useState } from "react";
-import { API_URL, getInfo } from "./api";
+import { getInfo } from "./api";
 import type { ServerInfo } from "./types";
 
 export type ServerState = "checking" | "waking" | "ready" | "error";
 
 export function useServer() {
-  const [state, setState] = useState<ServerState>(API_URL ? "checking" : "error");
+  const [state, setState] = useState<ServerState>("checking");
   const [info, setInfo] = useState<ServerInfo | null>(null);
 
   useEffect(() => {
-    if (!API_URL) {
-      setState("error");
-      return;
-    }
     let stop = false;
     let tries = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;

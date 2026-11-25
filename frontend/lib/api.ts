@@ -1,18 +1,12 @@
 import type { AnalyzeResponse, ServerInfo } from "./types";
 
-function resolveApiUrl(): string {
-  const explicit = (process.env.NEXT_PUBLIC_API_URL ?? "").trim();
-  if (explicit) return explicit.replace(/\/+$/, "");
-
-  const spaceId = (process.env.NEXT_PUBLIC_HF_SPACE_ID ?? "").trim();
-  if (spaceId) {
-    return `https://${spaceId.replace(/\//g, "-")}.hf.space`;
-  }
-
-  return "https://prome21-grainscan-api.hf.space";
-}
-
-export const API_URL = resolveApiUrl();
+/**
+ * Client always talks to same-origin Next.js proxy routes.
+ * The actual Hugging Face Space URL is resolved only on the server
+ * (see app/api/*/route.ts). This avoids browser cross-site POST blocks
+ * that HF Spaces enforce on direct *.hf.space form submissions.
+ */
+export const API_URL = ""; // same-origin; paths are /api/info and /api/analyze
 export const HF_SPACE_ID = (process.env.NEXT_PUBLIC_HF_SPACE_ID ?? "prome21/grainscan-api").trim();
 export const MAX_MB = Number(process.env.NEXT_PUBLIC_MAX_MB ?? "15");
 
@@ -45,7 +39,7 @@ function isAnalyzeResponse(value: unknown): value is AnalyzeResponse {
 }
 
 export async function getInfo(signal?: AbortSignal): Promise<ServerInfo> {
-  const r = await fetch(`${API_URL}/api/info`, { signal, cache: "no-store" });
+  const r = await fetch(`/api/info`, { signal, cache: "no-store" });
   if (!r.ok) {
     throw new ApiError(`Server responded ${r.status}`, r.status, isTemporaryStatus(r.status));
   }
@@ -71,7 +65,8 @@ export async function analyzeImage(file: File, signal?: AbortSignal): Promise<An
 
   let r: Response;
   try {
-    r = await fetch(`${API_URL}/api/analyze`, {
+    // Same-origin proxy — browser never posts directly to *.hf.space
+    r = await fetch(`/api/analyze`, {
       method: "POST",
       body,
       signal,
