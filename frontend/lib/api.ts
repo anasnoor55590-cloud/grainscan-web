@@ -1,6 +1,4 @@
 import type { AnalyzeResponse, ServerInfo } from "./types";
-
-
 export const API_URL = ""; // same-origin; paths are /api/info and /api/analyze
 export const HF_SPACE_ID = (process.env.NEXT_PUBLIC_HF_SPACE_ID ?? "prome21/grainscan-api").trim();
 export const MAX_MB = Number(process.env.NEXT_PUBLIC_MAX_MB ?? "15");
