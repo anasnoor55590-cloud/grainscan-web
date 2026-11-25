@@ -18,6 +18,12 @@ function resolveBackendUrl(): string {
 
 const BACKEND = resolveBackendUrl();
 
+function authHeaders(): HeadersInit {
+  const token = (process.env.HF_TOKEN ?? process.env.HUGGING_FACE_HUB_TOKEN ?? "").trim();
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}` };
+}
+
 /**
  * Gradio Space has no /api/info. We probe /gradio_api/info and synthesize ServerInfo.
  */
@@ -30,6 +36,7 @@ export async function GET(_req: NextRequest) {
     try {
       res = await fetch(`${BACKEND}/gradio_api/info`, {
         method: "GET",
+        headers: authHeaders(),
         signal: controller.signal,
         cache: "no-store",
       });

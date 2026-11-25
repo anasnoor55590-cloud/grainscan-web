@@ -18,6 +18,13 @@ function resolveBackendUrl(): string {
 
 const BACKEND = resolveBackendUrl();
 
+/** Server-only HF token — never expose as NEXT_PUBLIC_* */
+function authHeaders(): HeadersInit {
+  const token = (process.env.HF_TOKEN ?? process.env.HUGGING_FACE_HUB_TOKEN ?? "").trim();
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}` };
+}
+
 /**
  * Gradio 4+ flow (HF Space is Gradio, not raw FastAPI):
  * 1) POST file  → /gradio_api/upload  → [serverPath]
@@ -31,6 +38,7 @@ async function uploadFile(file: Blob, filename: string): Promise<string> {
   const res = await fetch(`${BACKEND}/gradio_api/upload`, {
     method: "POST",
     body: form,
+    headers: authHeaders(),
     cache: "no-store",
   });
 
@@ -49,7 +57,10 @@ async function uploadFile(file: Blob, filename: string): Promise<string> {
 async function callAnalyze(serverPath: string): Promise<string> {
   const res = await fetch(`${BACKEND}/gradio_api/call/analyze`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+    },
     body: JSON.stringify({
       data: [
         {
@@ -73,6 +84,21 @@ async function callAnalyze(serverPath: string): Promise<string> {
   return json.event_id;
 }
 
+function friendlyError(raw: string): string {
+  // ZeroGPU quota exceeded (common on free Spaces)
+  if (/ZeroGPU quota|exceeded your ZeroGPU/i.test(raw)) {
+    return (
+      "ZeroGPU quota exceeded for today. " +
+      "Wait for the daily reset, or set HF_TOKEN in Vercel (Hugging Face token) for higher quota. " +
+      "Create a token at https://huggingface.co/settings/tokens"
+    );
+  }
+  if (/timed out|AbortError/i.test(raw)) {
+    return "Analysis timed out. The backend may be starting up — please try again.";
+  }
+  return raw.slice(0, 400);
+}
+
 async function pollResult(eventId: string, timeoutMs = 50_000): Promise<unknown> {
   const url = `${BACKEND}/gradio_api/call/analyze/${eventId}`;
   const controller = new AbortController();
@@ -81,7 +107,10 @@ async function pollResult(eventId: string, timeoutMs = 50_000): Promise<unknown>
   try {
     const res = await fetch(url, {
       method: "GET",
-      headers: { Accept: "text/event-stream" },
+      headers: {
+        Accept: "text/event-stream",
+        ...authHeaders(),
+      },
       signal: controller.signal,
       cache: "no-store",
     });
@@ -110,13 +139,20 @@ async function pollResult(eventId: string, timeoutMs = 50_000): Promise<unknown>
     }
 
     if (lastEvent === "error") {
-      throw new Error(`Gradio error: ${lastData.slice(0, 300)}`);
+      throw new Error(friendlyError(lastData));
     }
 
     const parsed = JSON.parse(lastData);
-    // Gradio wraps outputs in an array; our endpoint returns one JSON object
+    // Gradio sometimes returns error objects inside the data array
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && parsed.error) {
+      throw new Error(friendlyError(typeof parsed.error === "string" ? parsed.error : JSON.stringify(parsed)));
+    }
     if (Array.isArray(parsed)) {
-      return parsed[0];
+      const first = parsed[0];
+      if (first && typeof first === "object" && first.error) {
+        throw new Error(friendlyError(typeof first.error === "string" ? first.error : JSON.stringify(first)));
+      }
+      return first;
     }
     return parsed;
   } finally {
@@ -150,18 +186,16 @@ export async function POST(req: NextRequest) {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (err) {
-    const message =
+    const raw =
       err instanceof Error
         ? err.name === "AbortError"
           ? "Analysis timed out. The backend may be starting up — please try again."
           : err.message
         : "Could not reach the analysis server.";
 
-    const status =
-      typeof message === "string" &&
-      (message.includes("starting") || message.includes("timed out") || message.includes("wake"))
-        ? 503
-        : 502;
+    const message = friendlyError(raw);
+    const isQuota = /ZeroGPU quota/i.test(message);
+    const status = isQuota ? 429 : /timed out|starting up/i.test(message) ? 503 : 502;
 
     return NextResponse.json({ detail: message }, { status });
   }

@@ -1,5 +1,11 @@
 import type { AnalyzeResponse, ServerInfo } from "./types";
 
+/**
+ * Client always talks to same-origin Next.js proxy routes.
+ * The actual Hugging Face Space URL is resolved only on the server
+ * (see app/api/*/route.ts). This avoids browser cross-site POST blocks
+ * that HF Spaces enforce on direct *.hf.space form submissions.
+ */
 export const API_URL = ""; // same-origin; paths are /api/info and /api/analyze
 export const HF_SPACE_ID = (process.env.NEXT_PUBLIC_HF_SPACE_ID ?? "prome21/grainscan-api").trim();
 export const MAX_MB = Number(process.env.NEXT_PUBLIC_MAX_MB ?? "15");
